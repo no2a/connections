@@ -1,15 +1,15 @@
-from gevent import monkey; monkey.patch_all()
+from gevent import monkey
+monkey.patch_all()  # NOQA
 
 import argparse
 import multiprocessing
-import sys
 import time
 
-from gevent.pool import Pool
+import gevent.pool as gevent_pool
 import requests
 
 
-def x(session, url):
+def request(session, url):
     try:
         resp = session.get(url)
         resp.raise_for_status()
@@ -19,21 +19,17 @@ def x(session, url):
     return True
 
 
-def run_session(url, interval):
-    session = requests.Session()
-    i = 0
+def run_session(url, interval, no_keep_alive):
+    session = None
     while True:
-        ok = x(session, url)
+        if not session:
+            session = requests.Session()
+        ok = request(session, url)
         if not ok:
             break
-        time.sleep(interval)
-        i += 1
-
-
-def launch(pool, url, connections, connection_per_second, request_interval):
-    interval = 1.0 / connection_per_second
-    for i in range(connections):
-        pool.spawn(run_session, url, request_interval)
+        if no_keep_alive:
+            session.close()
+            session = None
         time.sleep(interval)
 
 
@@ -44,16 +40,24 @@ def get_args():
     p.add_argument('--connection-per-second', type=float, default=100000.0)
     p.add_argument('--request-interval', type=float, default=10.0)
     p.add_argument('--processes', type=int)
+    p.add_argument('--no-keep-alive', action='store_true')
     args = p.parse_args()
     if not args.processes:
         args.processes = multiprocessing.cpu_count()
     return args
 
 
-def worker_main(url, connections, connection_per_second, request_interval):
-    pool = Pool(connections + 10)
-    pool.spawn(launch, pool, url, connections, connection_per_second, request_interval)
-    pool.join()
+def worker_main(url, connections, connection_per_second, request_interval, no_keep_alive):  # NOQA
+    gepool = gevent_pool.Pool(connections + 10)
+    interval = 1.0 / connection_per_second
+
+    def f():
+        for i in range(connections):
+            gepool.spawn(run_session, url, request_interval, no_keep_alive)
+            time.sleep(interval)
+
+    gepool.spawn(f)
+    gepool.join()
 
 
 def n_split(total, n):
@@ -64,6 +68,8 @@ def main():
     args = get_args()
     p_list = []
     for connections in n_split(args.connections, args.processes):
+        if connections < 1:
+            continue
         share = float(connections) / args.connections
         connection_per_second = args.connection_per_second * share
         target_args = (
@@ -71,6 +77,7 @@ def main():
             connections,
             connection_per_second,
             args.request_interval,
+            args.no_keep_alive,
             )
         p = multiprocessing.Process(
             target=worker_main,
