@@ -22,6 +22,7 @@ def request(session, url):
 def run_session(url, interval, no_keep_alive):
     session = None
     while True:
+        t0 = time.time()
         if not session:
             session = requests.Session()
         ok = request(session, url)
@@ -30,7 +31,9 @@ def run_session(url, interval, no_keep_alive):
         if no_keep_alive:
             session.close()
             session = None
-        time.sleep(interval)
+        t1 = time.time()
+        wait = max(interval - (t1 - t0), 0)
+        time.sleep(wait)
 
 
 def get_args():
@@ -53,8 +56,11 @@ def worker_main(url, connections, connection_per_second, request_interval, no_ke
 
     def f():
         for i in range(connections):
+            t0 = time.time()
             gepool.spawn(run_session, url, request_interval, no_keep_alive)
-            time.sleep(interval)
+            t1 = time.time()
+            wait = max(interval - (t0 - t1), 0)
+            time.sleep(wait)
 
     gepool.spawn(f)
     gepool.join()
