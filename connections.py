@@ -2,6 +2,7 @@ from gevent import monkey
 monkey.patch_all()  # NOQA
 
 import argparse
+import logging
 import multiprocessing
 import time
 
@@ -9,12 +10,19 @@ import gevent.pool as gevent_pool
 import requests
 
 
+LOG = logging.getLogger(__name__)
+
+
 def request(session, url):
     try:
+        t0 = time.time()
         resp = session.get(url)
+        t1 = time.time()
+        elapsed_ms = (t1 - t0) * 1000
+        LOG.debug('resp=%s elapsed_ms=%d', resp, elapsed_ms)
         resp.raise_for_status()
     except Exception as e:
-        print(e)
+        LOG.error(e)
         return False
     return True
 
@@ -40,8 +48,8 @@ def get_args():
     p = argparse.ArgumentParser()
     p.add_argument('url')
     p.add_argument('--connections', type=int, required=True)
-    p.add_argument('--connection-per-second', type=float, default=100000.0)
-    p.add_argument('--request-interval', type=float, default=10.0)
+    p.add_argument('--connection-per-second', type=float, default=0)
+    p.add_argument('--request-interval', type=float, default=0)
     p.add_argument('--processes', type=int)
     p.add_argument('--no-keep-alive', action='store_true')
     args = p.parse_args()
@@ -52,14 +60,17 @@ def get_args():
 
 def worker_main(url, connections, connection_per_second, request_interval, no_keep_alive):  # NOQA
     gepool = gevent_pool.Pool(connections + 10)
-    interval = 1.0 / connection_per_second
+    if connection_per_second > 0:
+        interval = 1.0 / connection_per_second
+    else:
+        interval = 0
 
     def f():
         for i in range(connections):
             t0 = time.time()
             gepool.spawn(run_session, url, request_interval, no_keep_alive)
             t1 = time.time()
-            wait = max(interval - (t0 - t1), 0)
+            wait = max(interval - (t1 - t0), 0)
             time.sleep(wait)
 
     gepool.spawn(f)
@@ -95,4 +106,7 @@ def main():
 
 
 if __name__ == '__main__':
+    import os
+    level = 'DEBUG' if int(os.environ.get('DEBUG', '0')) else 'INFO'
+    logging.basicConfig(level=level)
     main()
