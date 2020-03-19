@@ -108,5 +108,6 @@ def main():
 if __name__ == '__main__':
     import os
     level = 'DEBUG' if int(os.environ.get('DEBUG', '0')) else 'INFO'
-    logging.basicConfig(level=level)
+    format = '%(asctime)s %(levelname)s %(name)s %(message)s'
+    logging.basicConfig(level=level, format=format)
     main()
