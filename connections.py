@@ -13,10 +13,10 @@ import requests
 LOG = logging.getLogger(__name__)
 
 
-def request(session, url):
+def request(session, url, timeout):
     try:
         t0 = time.time()
-        resp = session.get(url)
+        resp = session.get(url, timeout=timeout)
         t1 = time.time()
         elapsed_ms = (t1 - t0) * 1000
         LOG.debug('resp=%s elapsed_ms=%d', resp, elapsed_ms)
@@ -27,13 +27,14 @@ def request(session, url):
     return True
 
 
-def run_session(url, interval, no_keep_alive):
+def run_session(url, interval, no_keep_alive, connect_timeout, read_timeout):
+    timeout = (connect_timeout, read_timeout)
     session = None
     while True:
         t0 = time.time()
         if not session:
             session = requests.Session()
-        ok = request(session, url)
+        ok = request(session, url, timeout)
         if not ok:
             break
         if no_keep_alive:
@@ -52,13 +53,15 @@ def get_args():
     p.add_argument('--request-interval', type=float, default=0)
     p.add_argument('--processes', type=int)
     p.add_argument('--no-keep-alive', action='store_true')
+    p.add_argument('--connect-timeout', type=float)
+    p.add_argument('--read-timeout', type=float)
     args = p.parse_args()
     if not args.processes:
         args.processes = multiprocessing.cpu_count()
     return args
 
 
-def worker_main(url, connections, connection_per_second, request_interval, no_keep_alive):  # NOQA
+def worker_main(url, connections, connection_per_second, request_interval, no_keep_alive, connect_timeout, read_timeout):  # NOQA
     gepool = gevent_pool.Pool(connections + 10)
     if connection_per_second > 0:
         interval = 1.0 / connection_per_second
@@ -68,7 +71,7 @@ def worker_main(url, connections, connection_per_second, request_interval, no_ke
     def f():
         for i in range(connections):
             t0 = time.time()
-            gepool.spawn(run_session, url, request_interval, no_keep_alive)
+            gepool.spawn(run_session, url, request_interval, no_keep_alive, connect_timeout, read_timeout)
             t1 = time.time()
             wait = max(interval - (t1 - t0), 0)
             time.sleep(wait)
@@ -95,6 +98,8 @@ def main():
             connection_per_second,
             args.request_interval,
             args.no_keep_alive,
+            args.connect_timeout,
+            args.read_timeout,
             )
         p = multiprocessing.Process(
             target=worker_main,
