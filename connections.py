@@ -33,7 +33,7 @@ def request(session, url, timeout):
 
 
 def run_session(stats, url, interval, no_keep_alive, connect_timeout, read_timeout):
-    first = False
+    first = True
     timeout = (connect_timeout, read_timeout)
     session = None
     while True:
@@ -44,8 +44,8 @@ def run_session(stats, url, interval, no_keep_alive, connect_timeout, read_timeo
         if not ok:
             break
         if first:
-            first = False
             stats.first += 1
+            first = False
         if no_keep_alive:
             session.close()
             session = None
