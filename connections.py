@@ -13,6 +13,11 @@ import requests
 LOG = logging.getLogger(__name__)
 
 
+class Stats:
+    def __init__(self):
+        self.first = 0
+
+
 def request(session, url, timeout):
     try:
         t0 = time.time()
@@ -27,7 +32,8 @@ def request(session, url, timeout):
     return True
 
 
-def run_session(url, interval, no_keep_alive, connect_timeout, read_timeout):
+def run_session(stats, url, interval, no_keep_alive, connect_timeout, read_timeout):
+    first = False
     timeout = (connect_timeout, read_timeout)
     session = None
     while True:
@@ -37,6 +43,9 @@ def run_session(url, interval, no_keep_alive, connect_timeout, read_timeout):
         ok = request(session, url, timeout)
         if not ok:
             break
+        if first:
+            first = False
+            stats.first += 1
         if no_keep_alive:
             session.close()
             session = None
@@ -67,17 +76,24 @@ def worker_main(url, connections, connection_per_second, request_interval, no_ke
         interval = 1.0 / connection_per_second
     else:
         interval = 0
+    stats = Stats()
 
     def f():
         for i in range(connections):
             t0 = time.time()
-            gepool.spawn(run_session, url, request_interval, no_keep_alive, connect_timeout, read_timeout)
+            gepool.spawn(run_session, stats, url, request_interval, no_keep_alive, connect_timeout, read_timeout)
             t1 = time.time()
             wait = max(interval - (t1 - t0), 0)
             time.sleep(wait)
 
     gepool.spawn(f)
-    gepool.join()
+    first_reported = False
+    while True:
+        time.sleep(1)
+        if not first_reported:
+            if stats.first >= connections:
+                LOG.info('established %d connections', stats.first)
+                first_reported = True
 
 
 def n_split(total, n):
